@@ -138,9 +138,11 @@ class DataSetLoader(object):
         # 7.metric
         print("step 7")
         #   1.mean
+        self.mean_list = self.train_with_class.groupby("class").agg('mean')
         # print(self.train_with_class.groupby("class").agg('mean'))
 
         #   2.std
+        self.std_list = self.train_with_class.groupby("class").agg('std')
         # print(self.train_with_class.groupby("class").agg('std'))
 
         #   3.similarity
@@ -159,12 +161,37 @@ class DataSetLoader(object):
                 for j in range(i+1, sim_ele.shape[0]):
                     dis = dis + sim_ele[i][j]
             sim_list.append(dis/num)
-
-        print(sim_list)
+        self.sim_list = sim_list
+        # print(sim_list)
         #   4.diversity
-        #   5.
-        # print(list(group))
-        # print(train_with_class.groupby("class").agg('mean'))
+
+
+
+        #   5.distribution
+        #   TODO:计算每一个gruup中不同维度的特征的数据分布
+        #   Input  : group_list    shape:17*[13*n]
+        #   Outpot : distribution  shape:17*[13*20] 说明：20是对区间范围的分桶区间
+
+        print(self.host_train_X.shape)
+
+        distribution = []
+        for i in range(len(group_list)):
+            dim = []
+            for j in range(self.host_train_X.values.shape[1]):
+                counts, bin_edges = np.histogram(group_list[i][1].iloc[:,j].values, bins=40)
+                dim.append(counts)
+            distribution.append(dim)
+        distribution = np.array(distribution)
+
+        self.distribution = distribution
+        print("distribution:",distribution.shape)
+
+        # Plot
+        # import matplotlib.pyplot as plt
+        # kwargs = dict(histtype='stepfilled', alpha=0.3, density=True, bins=40)
+        # plt.hist(group_list[0][1].iloc[:,0].values, **kwargs)
+    
+
 
     def Muti_tsne(self, X, save = False):
         """ tsne 降维到2维
@@ -217,13 +244,7 @@ class DataSetLoader(object):
     def metric(self):
         return 0
 
-    def data_merge(self):
-        df1 = pd.read_csv("./raw_data/data_class.csv", sep=',')
-        df2 = pd.read_csv("./raw_data/credit_embeddings.csv", sep=',')
-        frames = [self.host_train_X, self.host_train_Y, df2]
-        df = pd.concat(frames)
 
-        return df
 
 
 
