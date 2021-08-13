@@ -1,12 +1,12 @@
-"""MovieLens dataset"""
 import os
 import re
 import time
 import random
 import numpy as np
+from numpy.core.defchararray import index
 import pandas as pd
+from sklearn.cluster import KMeans
 from sklearn.metrics import mean_squared_error
-from sklearn.datasets import load_digits
 from MulticoreTSNE import MulticoreTSNE as TSNE
 from matplotlib import pyplot as plt
 
@@ -30,7 +30,8 @@ class DataSetLoader(object):
         self._train_ratio = 1 - pred_ratio
         self._test_ratio = test_ratio
 
-
+        
+        np.random.seed(0)
         self.all_data = load_data(_paths[self._name])
         shuffled_idx = np.random.permutation(self.all_data.shape[0])
 
@@ -66,33 +67,104 @@ class DataSetLoader(object):
         # 1. tsne n to 2 dim
         #     Input : local_feature   shape:  10000*12 
         #     Output: 2D_coordinates  shape:  10000*2
-
-        file_exist = True
-        if file_exist:
-            self.host_coordinate = pd.read_csv("credit_embeddings.csv", sep=',').values
+        print("step 1")
+        # embedding_exist = False
+        embedding_exist = True
+        if embedding_exist:
+            self.host_coordinate = pd.read_csv("./raw_data/credit_embeddings.csv", sep=',',index_col=0).values
         else:
             self.host_coordinate = self.Muti_tsne(self.host_train_X.values, True)
+            df = pd.DataFrame({"center_x":self.host_coordinate[:,0], "certer_y":self.host_coordinate[:,1]},list(self.host_train_X.index))
+            df.to_csv("./raw_data/credit_embeddings.csv")
         print(self.host_coordinate)
 
         # 2. Elbow method choose a K value automatically
         #     Input ：local_feature   shape:  10000*2
         #     Output：class_num       int  :  n
-
+        print("step 2")
+        # cluster_num_exist = False
         cluster_num_exist = True
+
         if cluster_num_exist:        
-            self.cluster_num = 17
+            self.cluster_num = 11
         else:
             self.cluster_num = self.ElbowMethod(self.host_train_X.values, 20, max_iter=500)
+
         print("elbow:", self.cluster_num) 
 
         # 3. 用kmeans聚类
         #     1. 输入：2D_coordinates `10000*2`  class_num `n`
-        #     2. 输出：data `10000*1`    
+        #     2. 输出：data `10000*1`  
+        print("step 3")
+        # Kmeans_exist = False
+        Kmeans_exist = True
+        if Kmeans_exist:
+            self.data_class = pd.read_csv("./raw_data/data_class.csv", sep=',',index_col=0)["class"].values
+        else:
+            kmeans = KMeans(self.cluster_num, random_state=0).fit(self.host_coordinate)
+            self.data_class = kmeans.labels_
+            df = pd.DataFrame({"center_x":self.host_coordinate[:,0], "certer_y":self.host_coordinate[:,1], "class":self.data_class},index = list(self.host_train_X.index))
+            df.to_csv("./raw_data/data_class.csv")            
+    
+        print(self.data_class)
 
-        
+        # 4. 生成中心坐标
+        print("step 4")
+        # center_exist = False
+        center_exist = True
+        if center_exist:
+            self.data_center = pd.read_csv("./raw_data/data_center.csv", sep=',',index_col=0).values
+        else:
+            center_x = kmeans.cluster_centers_[:,0]
+            center_y = kmeans.cluster_centers_[:,1]
+            df = pd.DataFrame({"center_x":center_x, "certer_y":center_y})
+            df.to_csv("./raw_data/data_center.csv")
 
 
+        # 5.data merge
+        print("step 5")
+        data_class = pd.read_csv("./raw_data/data_class.csv", sep=',',index_col=0)
+        # print(data_class.values)
+        # print(self.host_train_X)
+        # frames = [self.host_train_X, data_class]
+        # df = pd.concat(frames,axis=0,ignore_index=True,join='inner')
+        self.train_with_class = self.host_train_X.join(data_class)
 
+
+        # 6.groupby class
+        print("step 6")
+        self.group = self.train_with_class.groupby("class")
+
+        # 7.metric
+        print("step 7")
+        #   1.mean
+        # print(self.train_with_class.groupby("class").agg('mean'))
+
+        #   2.std
+        # print(self.train_with_class.groupby("class").agg('std'))
+
+        #   3.similarity
+        from sklearn.metrics.pairwise import pairwise_distances
+        # from sklearn.metrics.pairwise import cosine_similarity
+        group_list = list(self.group)
+
+        # print(group_list[0][1].iloc[:,0:13].values)
+
+        sim_list = []
+        for i in range(len(group_list)):
+            dis = 0
+            sim_ele = pairwise_distances(group_list[i][1].iloc[:,0:13].values, metric="cosine")
+            num = sim_ele.shape[0]*(sim_ele.shape[0]-1)/2
+            for i in range(sim_ele.shape[0]):
+                for j in range(i+1, sim_ele.shape[0]):
+                    dis = dis + sim_ele[i][j]
+            sim_list.append(dis/num)
+
+        print(sim_list)
+        #   4.diversity
+        #   5.
+        # print(list(group))
+        # print(train_with_class.groupby("class").agg('mean'))
 
     def Muti_tsne(self, X, save = False):
         """ tsne 降维到2维
@@ -114,8 +186,7 @@ class DataSetLoader(object):
 
     def ElbowMethod(self, array, max_cluster_number, min_cluster_number=1, init = 'k-means++', 
                     max_iter = 300, n_init = 50, random_state = None, remark=True):
-        import numpy as np
-        from sklearn.cluster import KMeans
+
         wcss = np.zeros(max_cluster_number) # a future within_cluster_sum_squares array
         
         for i in range(max_cluster_number):
@@ -142,6 +213,17 @@ class DataSetLoader(object):
         
         return (np.flip(np.argsort(cosines[1:-1]))+2+min_cluster_number)[0]
 
+
+    def metric(self):
+        return 0
+
+    def data_merge(self):
+        df1 = pd.read_csv("./raw_data/data_class.csv", sep=',')
+        df2 = pd.read_csv("./raw_data/credit_embeddings.csv", sep=',')
+        frames = [self.host_train_X, self.host_train_Y, df2]
+        df = pd.concat(frames)
+
+        return df
 
 
 
