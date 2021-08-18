@@ -4,6 +4,7 @@ import time
 import random
 import numpy as np
 from numpy.core.defchararray import index
+from numpy.core.numeric import indices
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.metrics import mean_squared_error
@@ -33,15 +34,25 @@ class DataSetLoader(object):
         
         np.random.seed(0)
         self.all_data = load_data(_paths[self._name])
-        shuffled_idx = np.random.permutation(self.all_data.shape[0])
+        # shuffled_idx = np.random.permutation(self.all_data.shape[0])
+
+        # num_train = int(np.ceil(self.all_data.shape[0] * self._train_ratio))
+        # self.all_train = self.all_data.iloc[shuffled_idx[:num_train]]
+        # self.all_pred = self.all_data.iloc[shuffled_idx[num_train:]]
+
+        # num_test = int(np.ceil(self.all_data.shape[0] * self._test_ratio))
+        # self.train = self.all_data.iloc[shuffled_idx[num_test:num_train]]
+        # self.test = self.all_data.iloc[shuffled_idx[:num_test]]
+        # 取消 shuffled     
+    
 
         num_train = int(np.ceil(self.all_data.shape[0] * self._train_ratio))
-        self.all_train = self.all_data.iloc[shuffled_idx[:num_train]]
-        self.all_pred = self.all_data.iloc[shuffled_idx[num_train:]]
+        self.all_train = self.all_data.iloc[:num_train]
+        self.all_pred = self.all_data.iloc[num_train:]
 
         num_test = int(np.ceil(self.all_data.shape[0] * self._test_ratio))
-        self.train = self.all_data.iloc[shuffled_idx[num_test:num_train]]
-        self.test = self.all_data.iloc[shuffled_idx[:num_test]]
+        self.train = self.all_data.iloc[num_test:num_train]
+        self.test = self.all_data.iloc[:num_test]
 
         print("All data : {}".format(self.all_data.shape[0]))
         print("\tAll train data : {}".format(self.all_train.shape[0]))
@@ -86,7 +97,7 @@ class DataSetLoader(object):
         cluster_num_exist = True
 
         if cluster_num_exist:        
-            self.cluster_num = 11
+            self.cluster_num = 18
         else:
             self.cluster_num = self.ElbowMethod(self.host_train_X.values, 20, max_iter=500)
 
@@ -145,13 +156,13 @@ class DataSetLoader(object):
         self.std_list = self.train_with_class.groupby("class").agg('std')
         # print(self.train_with_class.groupby("class").agg('std'))
 
-        #   3.similarity
+        #   3.contant diversity
         from sklearn.metrics.pairwise import pairwise_distances
         # from sklearn.metrics.pairwise import cosine_similarity
         group_list = list(self.group)
 
         # print(group_list[0][1].iloc[:,0:13].values)
-
+        print("7.3 contant diversity")
         sim_list = []
         for i in range(len(group_list)):
             dis = 0
@@ -162,29 +173,148 @@ class DataSetLoader(object):
                     dis = dis + sim_ele[i][j]
             sim_list.append(dis/num)
         self.sim_list = sim_list
-        # print(sim_list)
-        #   4.diversity
+        print(sim_list)
+        #   4.statistic homogeneity
 
 
 
         #   5.distribution
-        #   TODO:计算每一个gruup中不同维度的特征的数据分布
+        #   TODO:计算每一个group中不同维度的特征的数据分布
         #   Input  : group_list    shape:17*[13*n]
         #   Outpot : distribution  shape:17*[13*20] 说明：20是对区间范围的分桶区间
-
+        print("7.5 distribution")
         print(self.host_train_X.shape)
 
         distribution = []
         for i in range(len(group_list)):
             dim = []
             for j in range(self.host_train_X.values.shape[1]):
-                counts, bin_edges = np.histogram(group_list[i][1].iloc[:,j].values, bins=40)
+                counts, bin_edges = np.histogram(group_list[i][1].iloc[:,j].values, bins=80)
                 dim.append(counts)
             distribution.append(dim)
         distribution = np.array(distribution)
 
         self.distribution = distribution
         print("distribution:",distribution.shape)
+
+
+        # TODO:对每个group中 每行数据判断一下它是否在3sigma范围内
+        # group_large = []
+        # for gro in group
+        #     group_small = []
+        #     flag = True
+        #     for i in every line:
+        #         for every col in gro:
+        #             if x out of 3sigma:
+        #                 flag = False
+        #         if flag:
+        #             group_small.append(x)   
+        #     group_large.append(group_small)  
+        
+        group_large = []
+        delete_list = []
+        for i, element in enumerate(self.group):
+            #print(i, element)
+            group_small = []
+            delete_num = 0
+            print(element[1].values[:,0:13].shape)
+            sheet = element[1].values[:,0:13]
+            print("sheet.shape:", sheet.shape)
+            sheet_std = np.std(sheet, axis=0)
+            print("sheet_std, sheet_std.shape:", sheet_std, sheet_std.shape)
+            sheet_mean = np.mean(sheet, axis=0)
+            print("sheet_mean, sheet_mean.shape:", sheet_mean, sheet_mean.shape)
+            for line in range(0, sheet.shape[0]):
+                flag = True
+                for col in range (0, sheet.shape[1]):
+                    if self.out_of_sigma(sheet[line][col], sheet_std[col], sheet_mean[col]):
+                        flag = False
+                        # print(col)
+                if flag:
+                    group_small.append(sheet[line])
+                else:
+                    delete_num += 1
+            group_small = np.array(group_small)
+            group_large.append(group_small)
+            delete_list.append(delete_num)
+        
+        print("delete_list:",delete_list)
+        # print("group:",group_large)
+        self.after_filter_group = np.array(np.squeeze(group_large))
+        np.save("group_list.npy",self.after_filter_group)
+        # self.write_list_to_json(self.after_filter_group, "grouplist")
+        print("self.after_filter_group:", len(self.after_filter_group[0]))
+        b = np.squeeze(self.after_filter_group)
+        print("b.shape:", b[0].shape)
+
+
+        
+
+        import matplotlib.pyplot as plt
+        for i in range(0,12):
+            data = self.after_filter_group[i]
+            fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(18, 9))
+            axes.violinplot(data,  points=100, widths=0.5,
+                                showmeans=True, showextrema=True, showmedians=True)
+            # fig.suptitle("Violin0")
+            fig.subplots_adjust(hspace=0.4)
+            plt.savefig("violin"+str(i)+".png")
+
+    def out_of_sigma(self, ele, ele_std, ele_mean):
+        if abs(ele - ele_mean)/ele_std > 3:
+            return True
+
+        
+
+
+    # def write_list_to_json(self, list, json_file_name):
+    #     import json
+    #     """
+    #     将list写入到json文件
+    #     :param list:
+    #     :param json_file_name: 写入的json文件名字
+    #     :param json_file_save_path: json文件存储路径
+    #     :return:
+    #     """
+    #     with open(json_file_name, 'w') as  f:
+    #         json.dump(list, f)
+
+    
+
+        # print(group_list[0][1].iloc[:,0:13])
+
+
+        # print(self.train_with_class)
+
+        # import seaborn as sns
+        # import matplotlib.pyplot as plt
+
+        # tips = self.train_with_class
+        # ax = sns.violinplot(x="class", y="x1", data=tips)
+        # plt.savefig("x0.png")
+
+
+        # print(tips)
+
+        # plt.show()
+
+        # data = np.array(group_list[0][1].iloc[:,0:13].values)
+        # print(data.shape)
+        # print(distribution[5].T)
+
+
+# """         import matplotlib.pyplot as plt
+#         for i in range(0,5):
+#             data = np.array(group_list[i][1].iloc[:,0:13].values)
+#             fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(18, 9))
+#             axes.violinplot(data,  points=100, widths=0.5,
+#                                 showmeans=True, showextrema=True, showmedians=True)
+#             # fig.suptitle("Violin0")
+#             fig.subplots_adjust(hspace=0.4)
+#             plt.savefig("violin"+str(i)+".png") """
+
+
+        # plt.show()
 
         # Plot
         # import matplotlib.pyplot as plt
@@ -243,6 +373,37 @@ class DataSetLoader(object):
 
     def metric(self):
         return 0
+
+    # def three_sigma(self):
+    #     # 去除每个data set 中3sigma以外的数据
+    #     mean = 
+    #     std = 
+    #     indices = []
+    #     for i in listA:
+    #         if abs((i-mean)/3/std) < 1:
+    #             indices.append(i)
+
+    def filter(self):
+        #TODO:对每个group中 每行数据判断一下它是否在3sigma范围内
+        # group_large = []
+        # for gro in group
+        #     group_small = []
+        #     flag = True
+        #     for i in every line:
+        #         for every col in gro:
+        #             if x out of 3sigma:
+        #                 flag = False
+        #         if flag:
+        #             group_small.append(x)   
+        #     group_large.append(group_small)  
+                   
+
+        group_large = []
+        for i, element in enumerate(self.group):
+            print(i, element)
+        
+        return 0
+
 
 
 
